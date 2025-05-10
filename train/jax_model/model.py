@@ -1,15 +1,16 @@
 import jax.numpy as jnp
+import jax
+from flax.training import train_state
 from flax import linen as nn
-from custom_layer import SelfAttentionBlock
+import optax
+from jax_model.custom_layer import *
 
 class ConvBlock(nn.Module):
     features: int
 
     @nn.compact
-    def __call__(self, x):
-        x = nn.Conv(self.features, (3, 3), padding='SAME')(x)
-        x = nn.relu(x)
-        x = nn.Conv(self.features, (3, 3), padding='SAME')(x)
+    def __call__(self, x, strides=None, padding = 0):
+        x = nn.Conv(self.features, (3, 3), strides=strides , padding=padding)(x)
         x = nn.relu(x)
         return x
 
@@ -19,27 +20,38 @@ class UNetWithAttention(nn.Module):
     @nn.compact
     def __call__(self, x):
         # Encoder
-        x1 = ConvBlock(self.base_features)(x)
-        x2 = nn.max_pool(x1, (2, 2))
-
-        x2 = ConvBlock(self.base_features * 2)(x2)
-        x3 = nn.max_pool(x2, (2, 2))
+        x1 = ConvBlock(self.base_features)(x, strides = 2, padding = 2)
+        x1_con = nn.max_pool(x1, (2, 2))
+        print("x1_con shape before ConvBlock:", x1_con.shape)
+        x2 = ConvBlock(self.base_features * 2)(x1_con, strides = 2, padding = 2)
+        x2_con = nn.max_pool(x2, (2, 2))
 
         # Bottleneck with self-attention only
-        x3 = ConvBlock(self.base_features * 4)(x3)
+        x3 = ConvBlock(self.base_features * 4)(x2_con, strides = 2, padding = 1)
+        print("x3 shape before SelfAttentionBlock:", x3.shape)
         x3 = SelfAttentionBlock(num_heads=4, qkv_features=self.base_features * 4)(x3)
 
         # Decoder
+        print("x3 shape before ConvTranspose:", x3.shape)
         x = nn.ConvTranspose(self.base_features * 2, (2, 2), strides=(2, 2))(x3)
-        x = jnp.concatenate([x, x2], axis=-1)
-        x = ConvBlock(self.base_features * 2)(x)
+        print("x shape before concatenate:", x.shape)
+        print("x2_con shape before concatenate:", x2_con.shape)
+        x = jnp.concatenate([x, x2_con], axis=-1)
+        print("x shape before ConvBlock:", x.shape)
+        x = ConvBlock(self.base_features * 2)(x,padding = "SAME")
 
+        print("x shape before ConvTranspose:", x.shape)
         x = nn.ConvTranspose(self.base_features, (2, 2), strides=(2, 2))(x)
-        x = jnp.concatenate([x, x1], axis=-1)
-        x = ConvBlock(self.base_features)(x)
+        print("x shape before concatenate2:", x.shape)
+        x = jnp.concatenate([x, x1_con], axis=-1)
+        print("x shape before ConvBlock:", x.shape)
+        x = ConvBlock(self.base_features)(x,padding = "SAME")
 
         # Output layer
+        x = nn.ConvTranspose(self.base_features, (2, 2), strides=(2, 2))(x)
+        print("x shape before last Conv:", x.shape)
         x = nn.Conv(1, (1, 1))(x)
+        print("x shape before sigmoid:", x.shape)
         return nn.sigmoid(x)  # for binary segmentation
 
 # B. Loss function we want to use for the optimization
@@ -68,24 +80,13 @@ def calculate_accuracy(logits, labels):
     Returns:
         Mean accuracy for the current batch
     """
-    return jnp.mean(jnp.argmax(logits, -1) == jnp.argmax(labels, -1))
+    return jnp.mean(logits == labels)
 
 
 # D. Train step. We will `jit` transform it to compile it. We will get a
 # good speedup on the subseuqent runs
 @jax.jit
 def train_step(state, batch_data):
-    """Defines the single training step.
-
-    Args:
-        state: Current `TrainState` of the model
-        batch_data: Tuple containingm a batch of images and their corresponding labels
-    Returns:
-        loss: Mean loss for the current batch
-        accuracy: Mean accuracy for the current batch
-        state: Updated state of the model
-    """
-
     # 1. Get the images and the labels
     inputs, labels = batch_data
 
@@ -106,15 +107,6 @@ def train_step(state, batch_data):
 # E. Test/Evaluation step. We will `jit` transform it to compile it as well.
 @jax.jit
 def test_step(state, batch_data):
-    """Defines the single test/evaluation step.
-
-    Args:
-        state: Current `TrainState` of the model
-        batch_data: Tuple containingm a batch of images and their corresponding labels
-    Returns:
-        loss: Mean loss for the current batch
-        accuracy: Mean accuracy for the current batch
-    """
     # 1. Get the images and the labels
     inputs, labels = batch_data
 
@@ -141,7 +133,7 @@ def create_train_state(key, lr=1e-4):
     model = UNetWithAttention()
 
     # 2. Initialize the parameters of the model
-    params = model.init(key, jnp.ones([1, 32, 32, 3]))['params']
+    params = model.init(key, jnp.ones([1, 256, 256, 1]))['params']
 
     # 3. Define the optimizer with the desired learning rate
     optimizer = optax.adam(learning_rate=lr)
