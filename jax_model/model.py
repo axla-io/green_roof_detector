@@ -41,3 +41,111 @@ class UNetWithAttention(nn.Module):
         # Output layer
         x = nn.Conv(1, (1, 1))(x)
         return nn.sigmoid(x)  # for binary segmentation
+
+# B. Loss function we want to use for the optimization
+def calculate_loss(params, inputs, labels):
+    """Cross-Entropy loss function.
+
+    Args:
+        params: The parameters of the model at the current step
+        inputs: Batch of images
+        labels: Batch of corresponding labels
+    Returns:
+        loss: Mean loss value for the current batch
+        logits: Output of the last layer of the classifier
+    """
+    logits = UNetWithAttention().apply({'params': params}, inputs)
+    loss = jnp.mean(optax.binary_crossentropy_loss(logits=logits, labels=labels))
+    return loss, logits
+
+# C. Evaluation metric
+def calculate_accuracy(logits, labels):
+    """Computes accuracy for a given batch.
+
+    Args:
+        logits: Output of the last layer of the classifier
+        labels: Batch of corresponding labels
+    Returns:
+        Mean accuracy for the current batch
+    """
+    return jnp.mean(jnp.argmax(logits, -1) == jnp.argmax(labels, -1))
+
+
+# D. Train step. We will `jit` transform it to compile it. We will get a
+# good speedup on the subseuqent runs
+@jax.jit
+def train_step(state, batch_data):
+    """Defines the single training step.
+
+    Args:
+        state: Current `TrainState` of the model
+        batch_data: Tuple containingm a batch of images and their corresponding labels
+    Returns:
+        loss: Mean loss for the current batch
+        accuracy: Mean accuracy for the current batch
+        state: Updated state of the model
+    """
+
+    # 1. Get the images and the labels
+    inputs, labels = batch_data
+
+    # 2. Calculate the loss and get the gradients
+    (loss, logits), grads = jax.value_and_grad(calculate_loss, has_aux=True)(state.params, inputs, labels)
+
+    # 3. Calculate the accuracy for the cuurent batch
+    accuracy = calculate_accuracy(logits, labels)
+
+    # 4. Update the state (parameters values) of the model
+    state = state.apply_gradients(grads=grads)
+
+    # 5. Return loss, accuracy and the updated state
+    return loss, accuracy, state
+
+
+
+# E. Test/Evaluation step. We will `jit` transform it to compile it as well.
+@jax.jit
+def test_step(state, batch_data):
+    """Defines the single test/evaluation step.
+
+    Args:
+        state: Current `TrainState` of the model
+        batch_data: Tuple containingm a batch of images and their corresponding labels
+    Returns:
+        loss: Mean loss for the current batch
+        accuracy: Mean accuracy for the current batch
+    """
+    # 1. Get the images and the labels
+    inputs, labels = batch_data
+
+    # 2. Calculate the loss
+    loss, logits = calculate_loss(state.params, inputs, labels)
+
+    # 3. Calculate the accuracy
+    accuracy = calculate_accuracy(logits, labels)
+
+    # 4. Return loss and accuracy values
+    return loss, accuracy
+
+
+# F. Initial train state including parameters initialization
+def create_train_state(key, lr=1e-4):
+    """Creates initial `TrainState for our classifier.
+
+    Args:
+        key: PRNG key to initialize the model parameters
+        lr: Learning rate for the optimizer
+
+    """
+    # 1. Model instance
+    model = UNetWithAttention()
+
+    # 2. Initialize the parameters of the model
+    params = model.init(key, jnp.ones([1, 32, 32, 3]))['params']
+
+    # 3. Define the optimizer with the desired learning rate
+    optimizer = optax.adam(learning_rate=lr)
+
+    # 4. Create and return initial state from the above information. The `Module.apply` applies a
+    # module method to variables and returns output and modified variables.
+    return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
