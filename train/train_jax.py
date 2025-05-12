@@ -1,16 +1,21 @@
 from jax_model.custom_layer import *
 from jax_model.model import *
-
 from jax import random
+from load import load_data, data_generator
+import numpy as np
+import matplotlib.pyplot as plt
 
-EPOCHS = 1
+EPOCHS = 100
 BATCH_SIZE = 10
 
-
+# Initialize model
 key = random.PRNGKey(0)
-
 key, init_key = random.split(key)
-state = create_train_state(init_key)
+state = create_train_state(init_key, lr=3*1e-5)
+
+# Load training and testing set
+main_dir = "data/processed"
+(x_train, y_train), (x_valid, y_valid) = load_data(main_dir)
 
 # Lists to record loss and accuracy for each epoch
 training_loss = []
@@ -32,17 +37,18 @@ for i in range(EPOCHS):
     key, subkey = random.split(key)
 
     # Initialize data generators
-    train_data_gen = data_generator(x_train_normalized,
-                                y_train_ohe,
+    train_data_gen = data_generator(x_train,
+                                y_train,
                                 batch_size=BATCH_SIZE,
                                 is_valid=False,
                                 key=key
                                )
 
-    valid_data_gen = data_generator(x_valid_normalized,
-                               y_valid_ohe,
+    valid_data_gen = data_generator(x_valid,
+                               y_valid,
                                batch_size=BATCH_SIZE,
-                               is_valid=True
+                               is_valid=False,
+                               key=key
                                )
 
     print(f"Epoch: {i+1:<3}", end=" ")
