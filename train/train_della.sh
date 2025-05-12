@@ -2,10 +2,10 @@
 #SBATCH --job-name=jax_train
 #SBATCH --output=output_%j.log
 #SBATCH --error=error_%j.log
-#SBATCH --gres=gpu:4                 # request 4 GPUs
+#SBATCH --gres=gpu:2                 # request 4 GPUs
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=0:59:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 
