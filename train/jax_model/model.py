@@ -22,36 +22,25 @@ class UNetWithAttention(nn.Module):
         # Encoder
         x1 = ConvBlock(self.base_features)(x, strides = 2, padding = 2)
         x1_con = nn.max_pool(x1, (2, 2))
-        print("x1_con shape before ConvBlock:", x1_con.shape)
         x2 = ConvBlock(self.base_features * 2)(x1_con, strides = 2, padding = 2)
         x2_con = nn.max_pool(x2, (2, 2))
 
         # Bottleneck with self-attention only
         x3 = ConvBlock(self.base_features * 4)(x2_con, strides = 2, padding = 1)
-        print("x3 shape before SelfAttentionBlock:", x3.shape)
         x3 = SelfAttentionBlock(num_heads=4, qkv_features=self.base_features * 4)(x3)
 
         # Decoder
-        print("x3 shape before ConvTranspose:", x3.shape)
         x = nn.ConvTranspose(self.base_features * 2, (2, 2), strides=(2, 2))(x3)
-        print("x shape before concatenate:", x.shape)
-        print("x2_con shape before concatenate:", x2_con.shape)
         x = jnp.concatenate([x, x2_con], axis=-1)
-        print("x shape before ConvBlock:", x.shape)
         x = ConvBlock(self.base_features * 2)(x,padding = "SAME")
 
-        print("x shape before ConvTranspose:", x.shape)
         x = nn.ConvTranspose(self.base_features, (2, 2), strides=(2, 2))(x)
-        print("x shape before concatenate2:", x.shape)
         x = jnp.concatenate([x, x1_con], axis=-1)
-        print("x shape before ConvBlock:", x.shape)
         x = ConvBlock(self.base_features)(x,padding = "SAME")
 
         # Output layer
         x = nn.ConvTranspose(self.base_features, (2, 2), strides=(2, 2))(x)
-        print("x shape before last Conv:", x.shape)
         x = nn.Conv(1, (1, 1))(x)
-        print("x shape before sigmoid:", x.shape)
         return nn.sigmoid(x)  # for binary segmentation
 
 # B. Loss function we want to use for the optimization
@@ -67,20 +56,12 @@ def calculate_loss(params, inputs, labels):
         logits: Output of the last layer of the classifier
     """
     logits = UNetWithAttention().apply({'params': params}, inputs)
-    loss = jnp.mean(optax.binary_crossentropy_loss(logits=logits, labels=labels))
+    loss = jnp.mean(optax.sigmoid_binary_cross_entropy(logits=logits, labels=labels))
     return loss, logits
 
 # C. Evaluation metric
 def calculate_accuracy(logits, labels):
-    """Computes accuracy for a given batch.
-
-    Args:
-        logits: Output of the last layer of the classifier
-        labels: Batch of corresponding labels
-    Returns:
-        Mean accuracy for the current batch
-    """
-    return jnp.mean(logits == labels)
+    return  1.0 - jnp.mean(abs(logits - labels))
 
 
 # D. Train step. We will `jit` transform it to compile it. We will get a
