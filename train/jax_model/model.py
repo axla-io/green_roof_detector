@@ -1,8 +1,9 @@
-import jax.numpy as jnp
 import jax
-from flax.training import train_state
-from flax import linen as nn
+import jax.numpy as jnp
+from jax import lax
 import optax
+from flax import linen as nn
+from flax.training import train_state
 from jax_model.custom_layer import *
 
 class ConvBlock(nn.Module):
@@ -64,42 +65,46 @@ def calculate_accuracy(logits, labels):
     return  1.0 - jnp.mean(abs(logits - labels))
 
 
-# D. Train step. We will `jit` transform it to compile it. We will get a
-# good speedup on the subseuqent runs
-@jax.jit
+@jax.pmap(axis_name="batch")
 def train_step(state, batch_data):
-    # 1. Get the images and the labels
     inputs, labels = batch_data
 
-    # 2. Calculate the loss and get the gradients
-    (loss, logits), grads = jax.value_and_grad(calculate_loss, has_aux=True)(state.params, inputs, labels)
+    def loss_fn(params):
+        (loss, logits) = calculate_loss(params, inputs, labels)
+        return loss, logits
 
-    # 3. Calculate the accuracy for the cuurent batch
-    accuracy = calculate_accuracy(logits, labels)
+    (loss, logits), grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
 
-    # 4. Update the state (parameters values) of the model
+    # Aggregate gradients across devices
+    grads = lax.pmean(grads, axis_name="batch")
+
+    # Aggregate loss and accuracy
+    loss = lax.pmean(loss, axis_name="batch")
+    accuracy = lax.pmean(calculate_accuracy(logits, labels), axis_name="batch")
+
+    # Apply gradients
     state = state.apply_gradients(grads=grads)
 
-    # 5. Return loss, accuracy and the updated state
     return loss, accuracy, state
 
-
-
-# E. Test/Evaluation step. We will `jit` transform it to compile it as well.
-@jax.jit
+@jax.pmap(axis_name="batch")
 def test_step(state, batch_data):
-    # 1. Get the images and the labels
     inputs, labels = batch_data
 
-    # 2. Calculate the loss
     loss, logits = calculate_loss(state.params, inputs, labels)
 
-    # 3. Calculate the accuracy
-    accuracy = calculate_accuracy(logits, labels)
+    # Aggregate across devices
+    loss = lax.pmean(loss, axis_name="batch")
+    accuracy = lax.pmean(calculate_accuracy(logits, labels), axis_name="batch")
 
-    # 4. Return loss and accuracy values
     return loss, accuracy
 
+def shard(batch, num_devices):
+    # Assumes batch is a tuple of (x, y)
+    x, y = batch
+    x = x.reshape((num_devices, -1) + x.shape[1:])  # [num_devices, local_batch, ...]
+    y = y.reshape((num_devices, -1) + y.shape[1:])
+    return x, y
 
 # F. Initial train state including parameters initialization
 def create_train_state(key, lr=1e-4):
