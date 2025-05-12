@@ -64,6 +64,39 @@ def calculate_loss(params, inputs, labels):
 def calculate_accuracy(logits, labels):
     return  1.0 - jnp.mean(abs(logits - labels))
 
+# D. Train step. We will jit transform it to compile it. We will get a
+# good speedup on the subseuqent runs
+@jax.jit
+def train_step_cpu(state, batch_data):
+    # 1. Get the images and the labels
+    inputs, labels = batch_data
+
+    # 2. Calculate the loss and get the gradients
+    (loss, logits), grads = jax.value_and_grad(calculate_loss, has_aux=True)(state.params, inputs, labels)
+
+    # 3. Calculate the accuracy for the cuurent batch
+    accuracy = calculate_accuracy(logits, labels)
+
+    # 4. Update the state (parameters values) of the model
+    state = state.apply_gradients(grads=grads)
+
+    # 5. Return loss, accuracy and the updated state
+    return loss, accuracy, state
+
+# E. Test/Evaluation step. We will jit transform it to compile it as well.
+@jax.jit
+def test_step_cpu(state, batch_data):
+    # 1. Get the images and the labels
+    inputs, labels = batch_data
+
+    # 2. Calculate the loss
+    loss, logits = calculate_loss(state.params, inputs, labels)
+
+    # 3. Calculate the accuracy
+    accuracy = calculate_accuracy(logits, labels)
+
+    # 4. Return loss and accuracy values
+    return loss, accuracy
 
 @jax.pmap(axis_name="batch")
 def train_step(state, batch_data):

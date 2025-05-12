@@ -9,13 +9,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 
-# Load same modules as used for JAX build
 module purge
-module load anaconda3/2023.3
-module load cudatoolkit/11.3 cudnn/cuda-11.x/8.2.0
-
-# Activate the same environment
-source activate jax-gpu-src
+module load anaconda3/2024.6
+module load cudatoolkit/12.8 
+conda activate jx-env
 
 # Export CUDA library paths for JAX/XLA to find them
 export LD_LIBRARY_PATH=/usr/local/cuda-11.3/lib64:/usr/local/cudnn/cuda-11.3/8.2.0/lib64:$LD_LIBRARY_PATH
