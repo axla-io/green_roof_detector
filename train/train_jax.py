@@ -6,6 +6,7 @@ import numpy as np
 from flax.training import orbax_utils
 import orbax
 import jax
+import sys
 
 num_devices = jax.device_count()
 EPOCHS = 1
@@ -21,6 +22,11 @@ state = jax.device_put_replicated(state, jax.devices())
 
 # Load training and testing set
 main_dir = "data/processed"
+
+# Override if argument is passed
+if len(sys.argv) > 1:
+    main_dir = sys.argv[1]
+    
 (x_train, y_train), (x_valid, y_valid) = load_data(main_dir)
 
 # Lists to record loss and accuracy for each epoch
