@@ -3,15 +3,21 @@ from jax_model.model import *
 from jax import random
 from load import load_data, data_generator
 import numpy as np
-import matplotlib.pyplot as plt
+from flax.training import orbax_utils
+import orbax
+import jax
 
-EPOCHS = 100
-BATCH_SIZE = 10
+num_devices = jax.device_count()
+EPOCHS = 1
+BATCH_SIZE = 16
+assert BATCH_SIZE % num_devices == 0
 
 # Initialize model
+print("Number of devices:", num_devices)
 key = random.PRNGKey(0)
-key, init_key = random.split(key)
+key, init_key = random.split(key, num_devices)
 state = create_train_state(init_key, lr=3*1e-5)
+state = jax.device_put_replicated(state, jax.devices())
 
 # Load training and testing set
 main_dir = "data/processed"
@@ -55,17 +61,22 @@ for i in range(EPOCHS):
 
     # Training
     for step in range(num_train_batches):
-        batch_data = next(train_data_gen)
+        batch_data = shard(next(train_data_gen))  # shape: [num_devices, ...]
         loss_value, acc, state = train_step(state, batch_data)
-        train_batch_loss.append(loss_value)
-        train_batch_acc.append(acc)
+        loss_value = jax.device_get(loss_value)
+        acc = jax.device_get(acc)
+        train_batch_loss.append(np.mean(loss_value))
+        train_batch_acc.append(np.mean(acc))
 
     # Evaluation on validation data
+       
     for step in range(num_valid_batches):
-        batch_data = next(valid_data_gen)
+        batch_data = shard(next(valid_data_gen))  # shape: [num_devices, ...]
         loss_value, acc = test_step(state, batch_data)
-        valid_batch_loss.append(loss_value)
-        valid_batch_acc.append(acc)
+        loss_value = jax.device_get(loss_value)
+        acc = jax.device_get(acc)
+        valid_batch_loss.append(np.mean(loss_value))
+        valid_batch_acc.append(np.mean(acc))
 
     # Loss for the current epoch
     epoch_train_loss = np.mean(train_batch_loss)
@@ -81,3 +92,15 @@ for i in range(EPOCHS):
     validation_accuracy.append(epoch_valid_acc)
 
     print(f"loss: {epoch_train_loss:.3f}   acc: {epoch_train_acc:.3f}  valid_loss: {epoch_valid_loss:.3f}  valid_acc: {epoch_valid_acc:.3f}")
+
+ckpt = {
+    'model': jax.tree_map(lambda x: x[0], state),
+    'training_loss': training_loss,
+    'training_accuracy': training_accuracy,
+    'validation_loss': validation_loss,
+    'validation_accuracy': validation_accuracy,
+}
+
+orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+save_args = orbax_utils.save_args_from_target(ckpt)
+orbax_checkpointer.save('jax_output', ckpt, save_args=save_args)
