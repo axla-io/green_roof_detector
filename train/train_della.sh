@@ -29,4 +29,4 @@ export JAX_ENABLE_X64=1
 python -c "import jax; print('JAX devices:', jax.devices())"
 
 # Run your script
-python train_jax.py /scratch/gpfs/ll9426/green_roof_data/data/processed
+python train/train_jax.py /scratch/gpfs/ll9426/green_roof_data/data/processed
