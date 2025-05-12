@@ -1,12 +1,12 @@
 import os
 import random
-import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 from dataclasses import dataclass
+
 @dataclass
-class LoaderOptions:
-    """Class for storing data loader options. 
+class PreprocessorOptions:
+    """Class for storing data Preprocessor options. 
     Currently we enforce all images to be monochrome and normalized and square
     This class have the keyword arguments:
     - `augumentation`, which determines whether the data is augmented
@@ -20,7 +20,7 @@ class LoaderOptions:
     p_thresh: float = 0.5 #TODO: Implement functionality
     fraction: float = 0.25 
     w: int = 256
-class Loader:
+class Preprocessor:
     def __init__(self, options) -> None:
         self.options = options
     
@@ -64,8 +64,7 @@ class Loader:
         # Preprocess data
         train_img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
         small_img = cv2.resize(train_img, (self.options.w,self.options.w)) # Resize first to make subsequent operations faster
-        normalized_gray_img = cv2.normalize(small_img, None, 0, 1, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        return normalized_gray_img
+        return small_img
     
     def preprocess_mask(self, file_path) -> None:
         gt_img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
@@ -74,10 +73,10 @@ class Loader:
         return binary_mask
 
 if __name__ == "__main__":
-    options = LoaderOptions(w = 256)
-    loader = Loader(options)
+    options = PreprocessorOptions(w = 256)
+    preprocessor = Preprocessor(options)
     in_dir = "data/original"
     out_dir = "data/processed"
-    loader.clean_dir(out_dir)
+    preprocessor.clean_dir(out_dir)
     file_names = os.listdir(os.path.join(in_dir,"images"))
-    loader.preprocess(in_dir, out_dir, file_names)
+    preprocessor.preprocess(in_dir, out_dir, file_names)
