@@ -2,7 +2,6 @@
 #SBATCH --job-name=jax_train
 #SBATCH --output=output_%j.log
 #SBATCH --error=error_%j.log
-#SBATCH --partition=gpu              # adjust to your system
 #SBATCH --gres=gpu:4                 # request 4 GPUs
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
